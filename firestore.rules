@@ -1,0 +1,129 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitive Helpers
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    
+    // Admins Helper
+    function isAdmin() { 
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'mhtsai@gmail.com'
+      ); 
+    }
+
+    // Admins Collection (Strictly locked from client writes, only used internally or via server)
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && request.auth.uid == adminId;
+      allow list, write: if false;
+    }
+
+    // MenuItem Collection
+    match /menuItems/{menuItemId} {
+      // Anyone can read the menu (no Auth required for read, or just isSignedIn if we want to be strict. Let's allow public read for frontend menus)
+      allow read: if true;
+
+      function isValidMenuItem(data) {
+        return data.size() >= 3 && data.size() <= 7
+          && data.keys().hasAll(['category', 'name', 'createdAt'])
+          && data.category is string && data.category.size() > 0 && data.category.size() <= 50
+          && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+          && (('priceM' in data) == false || (data.priceM is number && data.priceM >= 0))
+          && (('priceL' in data) == false || (data.priceL is number && data.priceL >= 0))
+          && (('priceSingle' in data) == false || (data.priceSingle is number && data.priceSingle >= 0))
+          && (('isRecommended' in data) == false || data.isRecommended is bool)
+          && data.createdAt is timestamp;
+      }
+
+      allow create: if isVerified() && isAdmin()
+                    && isValidId(menuItemId)
+                    && isValidMenuItem(incoming())
+                    && incoming().createdAt == request.time;
+                    
+      allow update: if isVerified() && isAdmin()
+                    && isValidId(menuItemId)
+                    && isValidMenuItem(incoming())
+                    && incoming().createdAt == existing().createdAt;
+                    
+      allow delete: if isVerified() && isAdmin() && isValidId(menuItemId);
+    }
+
+    // Orders Collection
+    match /orders/{orderId} {
+      // Owners can read their own orders, admins can read all
+      allow list: if isVerified() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      
+      allow get: if isVerified() && isValidId(orderId) && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+
+      function isValidOrderItem(item) {
+        return item is map 
+          && item.keys().hasAll(['menuItemId', 'name', 'portion', 'price', 'quantity'])
+          && item.size() == 5
+          && item.menuItemId is string && item.menuItemId.size() > 0 && item.menuItemId.size() <= 128
+          && item.name is string && item.name.size() > 0 && item.name.size() <= 128
+          && item['portion'] is string && item['portion'].size() > 0 && item['portion'].size() <= 10 && item['portion'].matches('^(M|L|Single)$')
+          && item.price is number && item.price >= 0
+          && item.quantity is number && item.quantity > 0 && item.quantity <= 100;
+      }
+
+      function isValidOrder(data) {
+        return data.keys().hasAll(['userId', 'customerName', 'items', 'totalAmount', 'status', 'createdAt', 'updatedAt'])
+          && data.size() == 7
+          && data.userId == request.auth.uid
+          && data.customerName is string && data.customerName.size() > 0 && data.customerName.size() <= 100
+          && data.items is list
+          && data.items.size() > 0 && data.items.size() <= 50
+          // Firestore lists can't iterate, check first element constraints
+          && isValidOrderItem(data.items[0])
+          && exists(/databases/$(database)/documents/menuItems/$(data.items[0].menuItemId))
+          && data.totalAmount is number && data.totalAmount >= 0
+          && data.status is string && data.status.size() > 0 && data.status.size() <= 20 && data.status.matches('^(pending|preparing|completed|cancelled)$')
+          && data.createdAt is timestamp
+          && data.updatedAt is timestamp;
+      }
+
+      allow create: if isVerified() 
+                    && isValidId(orderId)
+                    && isValidOrder(incoming())
+                    && incoming().createdAt == request.time
+                    && incoming().updatedAt == request.time
+                    && incoming().status == 'pending';
+
+      allow update: if isVerified()
+                    && isValidId(orderId)
+                    && isValidOrder(incoming())
+                    && (
+                      isAdmin() ||
+                      (incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) 
+                       && existing().status == 'pending' 
+                       && incoming().status == 'cancelled'
+                       && incoming().userId == existing().userId
+                      )
+                    )
+                    && incoming().userId == existing().userId
+                    && incoming().totalAmount == existing().totalAmount
+                    && incoming().items == existing().items
+                    && incoming().createdAt == existing().createdAt
+                    && incoming().updatedAt == request.time;
+      
+      allow delete: if false; // Orders cannot be deleted
+    }
+  }
+}
