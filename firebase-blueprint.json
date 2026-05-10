@@ -1,0 +1,73 @@
+{
+  "entities": {
+    "MenuItem": {
+      "title": "Menu Item",
+      "description": "A drink or item available for order",
+      "type": "object",
+      "properties": {
+        "category": { "type": "string" },
+        "name": { "type": "string" },
+        "priceM": { "type": "number", "description": "Price for medium size" },
+        "priceL": { "type": "number", "description": "Price for large size" },
+        "priceSingle": { "type": "number", "description": "Price if no size applies" },
+        "isRecommended": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["category", "name", "createdAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A customer's order",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "OrderItem" }
+        },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "preparing", "completed", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "customerName", "items", "totalAmount", "status", "createdAt", "updatedAt"]
+    },
+    "OrderItem": {
+      "title": "Order Item",
+      "description": "A single line item in an order",
+      "type": "object",
+      "properties": {
+        "menuItemId": { "type": "string" },
+        "name": { "type": "string" },
+        "portion": { "type": "string", "enum": ["M", "L", "Single"] },
+        "price": { "type": "number" },
+        "quantity": { "type": "number" }
+      },
+      "required": ["menuItemId", "name", "portion", "price", "quantity"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Admin user profile",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" }
+      },
+      "required": ["email"]
+    }
+  },
+  "firestore": {
+    "/menuItems/{menuItemId}": {
+      "schema": { "$ref": "MenuItem" },
+      "description": "Menu items available for the shop"
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "Order" },
+      "description": "Orders placed by customers"
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "Admin" },
+      "description": "Admin users"
+    }
+  }
+}
